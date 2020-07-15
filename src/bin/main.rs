@@ -36,6 +36,7 @@ struct ConnHandler {
     stream: TcpStream,
     buffer: [u8; 4096],
     header_regex: Regex,
+    doc_root: String,
 }
 
 impl ConnHandler {
@@ -43,7 +44,8 @@ impl ConnHandler {
         ConnHandler{
             stream,
             buffer: [0_u8; 4096],
-            header_regex: Regex::new(r"GET (\S+?)\s+").unwrap(),
+            header_regex: Regex::new(r"^\s*GET (\S+)").unwrap(),
+            doc_root: String::from("htdocs"),
         }
     }
 
@@ -63,16 +65,14 @@ impl ConnHandler {
     // send appropriate response to client for some errors
     fn process(&mut self) -> ConnHandlerResult {
         self.stream.read(&mut self.buffer)?;
-        //println!("Read buffer: \n{}", String::from_utf8_lossy(&self.buffer));
         match self.get_request() {
             Some(req) => {
+                if req == "die" {
+                    panic!("I've been told to die!");
+                }
                 println!("Request is for {:?}", req);
-                let (status_line, file) = match req.as_str() {
-                    "/" => ("200 OK", "htdocs/hello.html"),
-                    "/sleep" => ("200 OK", "htdocs/sleep.html"),
-                    _ => ("404 NOT FOUND", "htdocs/404.html")
-                };
-                self.send_response(&status_line, &file)?;
+                let (status_line, contents) = self.get_response(&req);
+                self.send_response(&status_line, &contents)?;
             },
             None => {
                 println!("Invalid request: \n{}", 
@@ -82,22 +82,50 @@ impl ConnHandler {
         Ok(())
     }
 
-    fn send_response(&mut self, status_line: &str, file: &str) -> ConnHandlerResult {
-        let contents = fs::read_to_string(file)?;
-        let response = to_http(status_line, contents);
-        println!("Sending response: \n{}",
-             String::from_utf8_lossy(response.as_bytes()));
-        self.stream.write(response.as_bytes()).unwrap();
-        self.stream.flush().unwrap();
+    fn get_response(&self, req: &String) -> (String, String) {
+        let filename = self.get_filename(req);
+        println!("Reading: {}", filename);
+        let (status_line, contents) = match fs::read_to_string(filename) {
+            Ok(c) => (String::from("200 OK"), c),
+            Err(e) => (String::from("404 NOT FOUND"), 
+                       ConnHandler::get_error_content(&e)),
+        };
+        (status_line, contents)
+    }
+
+    fn get_filename(&self, req: &String) -> String {
+        if req.ends_with(".jpg") || req.ends_with(".html") {
+            // Fully specified file
+            return format!("{}{}", self.doc_root, req);
+        }
+        else if req.ends_with("/") {
+            // Directory - default to index.html
+            return format!("{}{}index.html", self.doc_root, req);
+        }
+        else {
+            // Shortcut to file - add .html
+            return format!("{}{}.html", self.doc_root, req);
+        }
+    }
+
+    fn send_response(&mut self, status_line: &str, 
+            contents: &String) -> ConnHandlerResult {
+        let response = ConnHandler::to_http(&status_line, &contents);
+        self.stream.write(response.as_bytes())?;
+        self.stream.flush()?;
         Ok(())
     }
-}
 
-fn to_http(status_line: &str, contents: String) -> String {
-    format!("
+    fn get_error_content(e: &std::io::Error) -> String {
+       format!("<html><a>Failed to load page: {}</a></html>", e)
+    }
+
+    fn to_http(status_line: &str, contents: &String) -> String {
+        format!("
 HTTP/1.1 {}
 Content-Length: {}
 
 {}
-    ", status_line, contents.len(), contents)
+        ", status_line, contents.len(), contents)
+    }
 }

@@ -67,7 +67,7 @@ impl ConnHandler {
         self.stream.read(&mut self.buffer)?;
         match self.get_request() {
             Some(req) => {
-                if req == "die" {
+                if req == "/die" {
                     panic!("I've been told to die!");
                 }
                 println!("Request is for {:?}", req);

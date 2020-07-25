@@ -7,6 +7,7 @@ use std::net::TcpStream;
 use std::io;
 use regex::bytes::Regex;
 
+// Main entry point
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let pool = ThreadPool::new(4);
@@ -24,6 +25,7 @@ fn main() {
     }
 }
 
+// EYE - Is this okay for handling other error types?
 type ConnHandlerResult = Result<(), io::Error>;
 
 fn handle_stream(stream: TcpStream) -> ConnHandlerResult {
@@ -32,6 +34,7 @@ fn handle_stream(stream: TcpStream) -> ConnHandlerResult {
     Ok(())
 }
 
+// Implements a single request in a single thread
 struct ConnHandler {
     stream: TcpStream,
     buffer: [u8; 4096],
@@ -82,10 +85,10 @@ impl ConnHandler {
         Ok(())
     }
 
-    fn get_response(&self, req: &String) -> (String, String) {
+    fn get_response(&self, req: &String) -> (String, Vec<u8>) {
         let filename = self.get_filename(req);
-        println!("Reading: {}", filename);
-        let (status_line, contents) = match fs::read_to_string(filename) {
+        println!("get_response: Reading file={}", filename);
+        let (status_line, contents) = match fs::read(filename) {
             Ok(c) => (String::from("200 OK"), c),
             Err(e) => (String::from("404 NOT FOUND"), 
                        ConnHandler::get_error_content(&e)),
@@ -109,23 +112,28 @@ impl ConnHandler {
     }
 
     fn send_response(&mut self, status_line: &str, 
-            contents: &String) -> ConnHandlerResult {
+            contents: &Vec<u8>) -> ConnHandlerResult {
         let response = ConnHandler::to_http(&status_line, &contents);
-        self.stream.write(response.as_bytes())?;
+        self.stream.write(&response)?;
         self.stream.flush()?;
         Ok(())
     }
 
-    fn get_error_content(e: &std::io::Error) -> String {
+    fn get_error_content(e: &std::io::Error) -> Vec<u8> {
        format!("<html><a>Failed to load page: {}</a></html>", e)
+           .as_bytes().to_vec()
     }
 
-    fn to_http(status_line: &str, contents: &String) -> String {
-        format!("
+    fn to_http(status_line: &str, contents: &Vec<u8>) -> Vec<u8> {
+        // EYE - set the mime type so images handled correctly?
+        let mut response = format!("
 HTTP/1.1 {}
 Content-Length: {}
 
-{}
-        ", status_line, contents.len(), contents)
+        ", status_line, contents.len())
+            .as_bytes()
+            .to_vec();
+        response.extend(contents);
+        response
     }
 }

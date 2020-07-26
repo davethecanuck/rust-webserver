@@ -9,7 +9,7 @@ use regex::bytes::Regex;
 
 // Main entry point
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    let listener = TcpListener::bind("192.168.50.137:7878").unwrap();
     let pool = ThreadPool::new(4);
 
     // NOTE - test to shut down on 2nd connection
@@ -74,8 +74,7 @@ impl ConnHandler {
                     panic!("I've been told to die!");
                 }
                 println!("Request is for {:?}", req);
-                let (status_line, contents) = self.get_response(&req);
-                self.send_response(&status_line, &contents)?;
+                self.send_response(&req)?;
             },
             None => {
                 println!("Invalid request: \n{}", 
@@ -85,15 +84,27 @@ impl ConnHandler {
         Ok(())
     }
 
-    fn get_response(&self, req: &String) -> (String, Vec<u8>) {
+    fn get_mime_type(&self, filename: &str) -> String {
+        // EYE Rudimentary - maybe use regex 
+        match filename {
+            x if x.ends_with(".html") => String::from("text/html"),
+            x if x.ends_with(".jpeg") => String::from("image/jpeg"),
+            x if x.ends_with(".jpg") => String::from("image/jpeg"),
+            _ => String::from("text/html"),
+        }
+    }
+
+    fn get_response(&self, req: &String) -> (String, Vec<u8>, String) {
         let filename = self.get_filename(req);
-        println!("get_response: Reading file={}", filename);
+        let mime_type = self.get_mime_type(&filename);
+        println!("get_response: Reading file={} mime_type={}", 
+                 filename, mime_type);
         let (status_line, contents) = match fs::read(filename) {
             Ok(c) => (String::from("200 OK"), c),
             Err(e) => (String::from("404 NOT FOUND"), 
                        ConnHandler::get_error_content(&e)),
         };
-        (status_line, contents)
+        (status_line, contents, mime_type)
     }
 
     fn get_filename(&self, req: &String) -> String {
@@ -111,9 +122,9 @@ impl ConnHandler {
         }
     }
 
-    fn send_response(&mut self, status_line: &str, 
-            contents: &Vec<u8>) -> ConnHandlerResult {
-        let response = ConnHandler::to_http(&status_line, &contents);
+    fn send_response(&mut self, req: &String) -> ConnHandlerResult {
+        let (status_line, contents, mime_type) = self.get_response(&req);
+        let response = ConnHandler::to_http(&status_line, &contents, &mime_type);
         self.stream.write(&response)?;
         self.stream.flush()?;
         Ok(())
@@ -124,13 +135,16 @@ impl ConnHandler {
            .as_bytes().to_vec()
     }
 
-    fn to_http(status_line: &str, contents: &Vec<u8>) -> Vec<u8> {
-        // EYE - set the mime type so images handled correctly?
+    fn to_http(status_line: &str, contents: &Vec<u8>, mime_type: &str) -> Vec<u8> {
+        println!("Sending mime_type={} content-length={}", 
+                 mime_type, contents.len());
         let mut response = format!("
 HTTP/1.1 {}
+Content-Type: {}
 Content-Length: {}
 
-        ", status_line, contents.len())
+
+        ", status_line, mime_type, contents.len())
             .as_bytes()
             .to_vec();
         response.extend(contents);

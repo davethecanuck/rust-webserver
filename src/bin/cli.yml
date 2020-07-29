@@ -1,0 +1,18 @@
+name: rust-webserver
+version: "1.0"
+author: David Sutherland <davethecanuck@gmail.com>
+about: Continuation of the Rust-by-example simple webserver to make morefully featured
+args:
+    - config:
+        short: c
+        long: config
+        value_name: FILE
+        help: Sets the server config file
+        takes_value: true
+        required: true
+subcommands:
+    - kill:
+        about: Kills the web server
+        version: "1.0"
+        author: David Sutherland <davethecanuck@gmail.com>
+

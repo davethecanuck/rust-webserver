@@ -7,13 +7,41 @@ use std::net::TcpStream;
 use std::io;
 use regex::bytes::Regex;
 
+#[macro_use]
+extern crate serde_derive;
+extern crate serde;
+extern crate serde_json;
+
+#[macro_use]
+extern crate clap;
+use clap::App;
+
+// EYE - TBD create a separate config crate?
+//mod config;
+
 // Main entry point
 fn main() {
-    let listener = TcpListener::bind("192.168.50.137:7878").unwrap();
+    // Load command line arguments defined in cli.yml
+    let cli = load_yaml!("cli.yml");
+    let args = App::from_yaml(cli).get_matches();
+
+    let config_file = args.value_of("config")
+        .unwrap_or("config/localhost.json");
+    let config = fs::read_to_string(&config_file).unwrap();
+    let server_config: ServerConfig = serde_json::from_str(&config).unwrap();
+    let address = format!("{}:{}", server_config.host, server_config.port);
+    /* EYE - alternate using config module
+    let args = config::args();
+    */
+    println!("Got args={:?}", args);
+
+    // EYE hardcoding for now
+    println!("Serving on: {}", address);
+    let listener = TcpListener::bind(address).unwrap();
     let pool = ThreadPool::new(4);
 
     // NOTE - test to shut down on 2nd connection
-    //for stream in listener.incoming().take(2) {
+    //for stream in listener.incoming().take(2) 
     for stream in listener.incoming() {
         let stream = stream.unwrap();
         pool.execute(|| {
@@ -23,6 +51,14 @@ fn main() {
             }
         });
     }
+}
+
+// Server configuration
+#[derive(Serialize, Deserialize)]
+struct ServerConfig {
+    host: String,
+    port: u32,
+    document_root: String,
 }
 
 // EYE - Is this okay for handling other error types?

@@ -1,5 +1,0 @@
-{
-    "host": "127.0.0.1", 
-    "port":7878,
-    "document_root": "/home/davids/Projects/rust/rust-webserver/htdocs"
-}

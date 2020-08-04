@@ -1,0 +1,3 @@
+[submodule "utils/multiproc"]
+	path = utils/multiproc
+	url = https://github.com/davethecanuck/rust-utils-multiproc.git

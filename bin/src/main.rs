@@ -186,10 +186,8 @@ impl ConnHandler {
         let mut response = format!("
 HTTP/1.1 {}
 Content-Type: {}
-Content-Length: {}
-
-
-        ", status_line, mime_type, contents.len())
+Content-Length: {}\n\n", 
+            status_line, mime_type, contents.len())
             .as_bytes()
             .to_vec();
         response.extend(contents);

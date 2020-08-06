@@ -134,7 +134,8 @@ impl ConnHandler {
             x if x.ends_with(".jpeg") => String::from("image/jpeg"),
             x if x.ends_with(".jpg") => String::from("image/jpeg"),
             x if x.ends_with(".png") => String::from("image/png"),
-            _ => String::from("text/html"),
+            x if x.ends_with(".gif") => String::from("image/gif"),
+            _ => String::from("image/*"),
         }
     }
 
@@ -153,7 +154,8 @@ impl ConnHandler {
 
     fn get_filename(&self, req: &String) -> String {
         // EYE - Make much more flexible
-        if req.ends_with(".jpg") || req.ends_with(".png") || req.ends_with(".html") {
+        if req.ends_with(".jpg") || req.ends_with(".png") 
+                || req.ends_with(".html") || req.ends_with(".gif") {
             // Fully specified file
             return format!("{}{}", self.server_config.document_root, req);
         }

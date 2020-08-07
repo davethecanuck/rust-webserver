@@ -4,6 +4,7 @@ use std::io::prelude::*;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::io;
+use std::sync::Arc;
 use regex::bytes::Regex;
 use serde::Serialize;
 use serde::Deserialize;
@@ -29,7 +30,7 @@ struct CliOpt {
 }
 
 // Server configuration
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ServerConfig {
     host: String,
     port: u32,
@@ -42,36 +43,46 @@ impl ServerConfig {
     }
 }
 
+// EYE - Is this okay for handling other error types?
+type ConnHandlerResult = Result<(), io::Error>;
+
 // Main entry point
 fn main() {
-    // Load command line arguments defined in cli.yml
     let args = CliOpt::from_args();
     println!("Loading server config from {:?}", args.config);
     let config = fs::read_to_string(&args.config).unwrap();
     let server_config: ServerConfig = serde_json::from_str(&config).unwrap();
-    let address = server_config.address();
-    println!("Serving on: {}", address);
+    start_server(server_config);
+}
 
+// Main loop for the server
+fn start_server(server_config: ServerConfig) {
+    let address = server_config.address();
     let listener = TcpListener::bind(address).unwrap();
+    println!("Serving on: {}", server_config.address());
     let pool = ThreadPool::new(4);
+    let server_config = Arc::new(server_config);
 
     for stream in listener.incoming() {
-        // Cheat and clone config for each stream
-        let stream = stream.unwrap();
-        let c = server_config.clone();
-        pool.execute(|| {
-            match handle_stream(stream, c) {
-                Err(e) => println!("Failed to handle_stream: {:?}", e),
-                _ => (),
+        match stream {
+            Ok(stream) => {
+                let thread_config = server_config.clone();
+                pool.execute(move || {
+                    match handle_stream(stream, thread_config) {
+                        Err(e) => println!("Failed to handle_stream: {:?}", e),
+                        _ => (),
+                    }
+                });
+            },
+            Err(e) => {
+                println!("Stream return error: {:?}", e);
             }
-        });
+        }
     }
 }
 
-// EYE - Is this okay for handling other error types?
-type ConnHandlerResult = Result<(), io::Error>;
-
-fn handle_stream(stream: TcpStream, server_config: ServerConfig) -> ConnHandlerResult {
+fn handle_stream(stream: TcpStream, 
+        server_config: Arc<ServerConfig>) -> ConnHandlerResult {
     let mut conn_handler = ConnHandler::new(stream, server_config);
     conn_handler.process()?;
     Ok(())
@@ -82,11 +93,11 @@ struct ConnHandler {
     stream: TcpStream,
     buffer: [u8; 4096],
     header_regex: Regex,
-    server_config: ServerConfig,
+    server_config: Arc<ServerConfig>,
 }
 
 impl ConnHandler {
-    fn new(stream: TcpStream, server_config: ServerConfig) -> ConnHandler {
+    fn new(stream: TcpStream, server_config: Arc<ServerConfig>) -> ConnHandler {
         ConnHandler{
             stream,
             buffer: [0_u8; 4096],

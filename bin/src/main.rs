@@ -10,6 +10,10 @@ use serde::Serialize;
 use serde::Deserialize;
 use serde_json;
 
+mod app_log_config;
+use app_log_config::AppLogConfig;
+use log::{info, error};
+
 // Our custom threadpool library
 use utils_multiproc::ThreadPool;
 
@@ -17,19 +21,32 @@ use utils_multiproc::ThreadPool;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
+//-------------------------------------
+// Command line arguments
+//-------------------------------------
 #[derive(Debug, StructOpt)]
 #[structopt(name = "rust-webserver", about = "A simple webserver.")]
 struct CliOpt {
-    /// Set config file
+    /// Set webserver config file
     #[structopt(
         short = "c", 
         long = "config", 
         default_value = "sample/config/localhost.json"
     )]
     config: PathBuf,
+
+    /// Log file directory
+    #[structopt(short="l", long="log")]
+    log_path: Option<PathBuf>,
+
+    /// One of info/warn/error/debug/trace
+    #[structopt(short="v", long="verbosity", default_value="info")]
+    verbosity: String,
 }
 
+//-------------------------------------
 // Server configuration
+//-------------------------------------
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ServerConfig {
     host: String,
@@ -43,13 +60,21 @@ impl ServerConfig {
     }
 }
 
+//-----------------------------------------------
 // EYE - Is this okay for handling other error types?
+//-----------------------------------------------
 type ConnHandlerResult = Result<(), io::Error>;
 
+//-------------------------------------
 // Main entry point
+//-------------------------------------
 fn main() {
+    // Parse command line args and setup logging
     let args = CliOpt::from_args();
-    println!("Loading server config from {:?}", args.config);
+    let log_config = AppLogConfig::new(args.verbosity, args.log_path);
+    log_config.init_flexi_logger();
+
+    info!("Loading server config from {:?}", args.config);
     let config = fs::read_to_string(&args.config).unwrap();
     let server_config: ServerConfig = serde_json::from_str(&config).unwrap();
     start_server(server_config);
@@ -59,7 +84,7 @@ fn main() {
 fn start_server(server_config: ServerConfig) {
     let address = server_config.address();
     let listener = TcpListener::bind(address).unwrap();
-    println!("Serving on: {}", server_config.address());
+    info!("Serving on: {}", server_config.address());
     let pool = ThreadPool::new(4);
     let server_config = Arc::new(server_config);
 
@@ -69,13 +94,13 @@ fn start_server(server_config: ServerConfig) {
                 let thread_config = server_config.clone();
                 pool.execute(move || {
                     match handle_stream(stream, thread_config) {
-                        Err(e) => println!("Failed to handle_stream: {:?}", e),
+                        Err(e) => error!("Failed to handle_stream: {:?}", e),
                         _ => (),
                     }
                 });
             },
             Err(e) => {
-                println!("Stream return error: {:?}", e);
+                error!("Stream return error: {:?}", e);
             }
         }
     }
@@ -88,7 +113,9 @@ fn handle_stream(stream: TcpStream,
     Ok(())
 }
 
+//------------------------------------------------
 // Implements a single request in a single thread
+//------------------------------------------------
 struct ConnHandler {
     stream: TcpStream,
     buffer: [u8; 4096],
@@ -127,11 +154,11 @@ impl ConnHandler {
                 if req == "/die" {
                     panic!("I've been told to die!");
                 }
-                println!("Request is for {:?}", req);
+                info!("Request is for {:?}", req);
                 self.send_response(&req)?;
             },
             None => {
-                println!("Invalid request: \n{}", 
+                error!("Invalid request: \n{}", 
                     String::from_utf8_lossy(&self.buffer));
             }
         }
@@ -153,7 +180,7 @@ impl ConnHandler {
     fn get_response(&self, req: &String) -> (String, Vec<u8>, String) {
         let filename = self.get_filename(req);
         let mime_type = self.get_mime_type(&filename);
-        println!("get_response: Reading file={} mime_type={}", 
+        info!("get_response: Reading file={} mime_type={}", 
                  filename, mime_type);
         let (status_line, contents) = match fs::read(filename) {
             Ok(c) => (String::from("200 OK"), c),
@@ -194,7 +221,7 @@ impl ConnHandler {
     }
 
     fn to_http(status_line: &str, contents: &Vec<u8>, mime_type: &str) -> Vec<u8> {
-        println!("Sending mime_type={} content-length={}", 
+        info!("Sending mime_type={} content-length={}", 
                  mime_type, contents.len());
         let mut response = format!("
 HTTP/1.1 {}

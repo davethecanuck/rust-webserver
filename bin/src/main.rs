@@ -1,4 +1,5 @@
 use std::fs;
+use std::fs::metadata;
 use std::str;
 use std::io::prelude::*;
 use std::net::TcpListener;
@@ -12,7 +13,7 @@ use serde_json;
 
 mod app_log_config;
 use app_log_config::AppLogConfig;
-use log::{info, error};
+use log::{info, warn, error};
 
 // Our custom threadpool library
 use utils_multiproc::ThreadPool;
@@ -166,14 +167,18 @@ impl ConnHandler {
     }
 
     fn get_mime_type(&self, filename: &str) -> String {
-        // EYE Rudimentary - maybe use regex 
+        // EYE - Could switch to mime/mime_guess crate but
+        // save for if needed
         match filename {
             x if x.ends_with(".html") => String::from("text/html"),
+            x if x.ends_with(".css") => String::from("text/css"),
             x if x.ends_with(".jpeg") => String::from("image/jpeg"),
             x if x.ends_with(".jpg") => String::from("image/jpeg"),
             x if x.ends_with(".png") => String::from("image/png"),
             x if x.ends_with(".gif") => String::from("image/gif"),
-            _ => String::from("image/*"),
+            x if x.ends_with(".json") => String::from("json"),
+            x if x.ends_with(".js") => String::from("application/javascript"),
+            _ => String::from("text/html"),
         }
     }
 
@@ -181,7 +186,7 @@ impl ConnHandler {
         let filename = self.get_filename(req);
         let mime_type = self.get_mime_type(&filename);
         info!("get_response: Reading file={} mime_type={}", 
-                 filename, mime_type);
+            filename, mime_type);
         let (status_line, contents) = match fs::read(filename) {
             Ok(c) => (String::from("200 OK"), c),
             Err(e) => (String::from("404 NOT FOUND"), 
@@ -191,19 +196,24 @@ impl ConnHandler {
     }
 
     fn get_filename(&self, req: &String) -> String {
-        // EYE - Make much more flexible
-        if req.ends_with(".jpg") || req.ends_with(".png") 
-                || req.ends_with(".html") || req.ends_with(".gif") {
-            // Fully specified file
-            return format!("{}{}", self.server_config.document_root, req);
-        }
-        else if req.ends_with("/") {
-            // Directory - default to index.html
-            return format!("{}{}index.html", self.server_config.document_root, req);
-        }
-        else {
-            // Shortcut to file - add .html
-            return format!("{}{}.html", self.server_config.document_root, req);
+        let path = format!("{}{}", self.server_config.document_root, req);
+
+        match metadata(path.as_str()) {
+            Ok(md) => {
+                if md.is_dir() {
+                    // Return index.html in that directory
+                    return format!("{}/index.html", path);
+                }
+                else {
+                    // It's a file so return directly
+                    return path;
+                }
+            },
+            Err(_e) => {
+                // Could not find file
+                warn!("Could not find file for request: {}", req);
+                return path;
+            }
         }
     }
 
